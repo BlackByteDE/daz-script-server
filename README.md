@@ -1,11 +1,29 @@
 # DazScript Server
 
-**Version 2.9.3** | DAZ Studio 4.5+ | DAZ Studio 6.25+ | Windows & macOS
+**Version 2.9.2+bb.1** | DAZ Studio 4.5+ | DAZ Studio 6.25+ | Windows & macOS
 
 [![Docs](https://img.shields.io/badge/docs-dazpy%20SDK-blue)](https://bluemoonfoundry.github.io/daz-script-server/)
 [![HTTP API](https://img.shields.io/badge/docs-HTTP%20API%20reference-blue)](https://bluemoonfoundry.github.io/daz-script-server/api-reference/)
 
 A production-ready DAZ Studio plugin that embeds a secure HTTP server inside DAZ Studio, enabling remote execution of DazScript via HTTP POST requests (or an optional Python library that wraps the interface and adds additional features) with JSON responses. Control DAZ Studio programmatically from external tools, automation scripts, and custom applications.
+
+---
+
+## About This Fork
+
+This is [BlackByteDE](https://github.com/BlackByteDE)'s fork of
+[bluemoonfoundry/daz-script-server](https://github.com/bluemoonfoundry/daz-script-server).
+It exists because real production use — automating renders via
+[daz-mcp-server](https://github.com/bluemoonfoundry/daz-mcp-server) — turned up
+a DAZ Studio 6 bug that blocked that workflow: DazScript's
+`renderMgr["renderFinished(bool)"].connect()` throws before `doRender()` runs,
+so `POST /render` / `daz_render_async` always failed. Fixes are tracked in
+[FORK_CHANGELOG.md](FORK_CHANGELOG.md); upstream changes are mirrored
+unmodified in [CHANGELOG.md](CHANGELOG.md).
+
+Fork releases are versioned `<upstream-version>+bb.<n>` (e.g. `2.9.2+bb.1`) so
+they never collide with upstream's own version numbers — see
+[FORK_CHANGELOG.md](FORK_CHANGELOG.md) for details and the fix history.
 
 > [!NOTE]
 > As of v2.6.0, plugins for DS4 and DS6 on Windows, MacOS Intel, and MacOS Apple Silicon are included as part of the standard release artifacts. Remember that if you want to use a newer version of the plugin you must remove any old DLL or dylib file first!
