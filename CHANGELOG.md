@@ -4,6 +4,15 @@ All notable changes to DazScript Server are documented here.
 
 ## [Unreleased]
 
+## [2.9.3] - 2026-08-30
+
+### Fixed
+
+DazScript `renderMgr["renderFinished(bool)"].connect()` throws on DAZ Studio 6
+(`Cannot call method 'connect' of undefined`) before `doRender()` runs, so
+`POST /render` / `daz_render_async` always failed. Bind the signal only when it
+exists; otherwise treat a completed `doRender()` as success.
+
 ## [2.9.2] - 2026-08-21
 
 ### dazpy script-call batching
