@@ -7,6 +7,29 @@ This fork's version scheme is `<upstream-version>+bb.<n>` — see
 are tracked in [CHANGELOG.md](CHANGELOG.md) (mirrored from upstream, not
 duplicated here) — only fork-specific fixes are listed below.
 
+## Unreleased
+
+### Added
+
+`POST /geometry/frames` — deformed figure vertices (base resolution by
+default, optionally a vertex/surface subset) plus world-space bone origins for
+a list of frames, returned as one binary float32 payload
+(`application/octet-stream`, format in `include/GeometryExport.h`). Only the
+figure is evaluated per frame (`setFrame` + `forceCacheUpdate`); the frame is
+restored afterwards, followed by one Scene update (`"sceneUpdate": false`
+skips it, ~130 ms). The Resolution Level is switched to Base only when the
+cached mesh is not already the base cage — at "High Resolution" it normally
+is, and the toggle alone cost ~1 s per call. Measured on a dressed G8F
+(16,556 vertices): ~17 ms/frame and ~5 ms for a single frame without update,
+vs. ~234 ms/frame for the equivalent DazScript loop; values bit-identical.
+Requested by pinkcharakter.
+
+### Fixed
+
+Plugin routes (`registerPluginRoute`) set the response body via `strlen`,
+truncating any body containing a NUL byte; the length is now passed
+explicitly.
+
 ## 2.9.2+bb.1 — 2026-08-30
 
 Fork baseline, based on `bluemoonfoundry/daz-script-server` at `2.9.2`
