@@ -35,7 +35,6 @@ CLAUDE.md. Das Python-Gegenstück liegt in
 
 | Was | Quelle | Seit | Details |
 |---|---|---|---|
-| Erkennen, wann das Kleidungs-Smoothing (`DzMeshSmoothModifier`) nach einem Frame-Wechsel fertig ist, damit ein Render erst dann startet und die Kleidung im Bild sitzt (heute feste `--settle-seconds` im Aufrufer). Untersuchung zuerst: Ist `DzProgress::isActive()`/`DzBackgroundProgress::isActive()` (siehe `isMainThreadBusy()`) während des Smoothings `true`? Welche Signale senden `DzMeshSmoothModifier`/`DzObject`? Gibt es einen Cache-Status? Per DazScript nicht lesbar: `forceCacheUpdate()` + `getCachedGeom()` enthält das Smoothing nicht. Ergebnis je nach Fund: SSE-Event (z. B. `smoothing.finished`) oder Busy-Flag, das Render-Endpoints/`daz_wait_for_scene_event` abwarten. `time.changed` reicht nicht (feuert vor der Berechnung) | pinkcharakter (via daz-mcp-server) | 2026-10-19 | Bug #46 — [bugs/render-viewport.md](../pinkcharakter/docs/bugs/render-viewport.md); Aufrufer-Sicht: `../daz-mcp-server/FORK_TODO.md` |
 
 ## Später / optional
 
