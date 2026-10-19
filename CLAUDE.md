@@ -1,7 +1,12 @@
 # CLAUDE.md
 
 Handoff: `D:\OpenCode\Projects\daz-mcp-dev-handoff.md`
-Bug-Katalog: `D:\Devpinkcharakter\docs\daz-mcp-bridge-bugs.md`
+Bug-Katalog: `D:\Dev\pinkcharakter\docs\daz-mcp-bridge-bugs.md`
+Fork-Todo: [FORK_TODO.md](FORK_TODO.md) — eigene Aufträge des Forks; andere
+Projekte legen ihre Plugin-Aufträge dort ab. Die beads-Issues (`bd`) sind
+Upstreams Roadmap, nicht unsere — nicht abarbeiten, das gäbe Merge-Konflikte
+mit Upstream. Dies gilt trotz des Beads-Blocks weiter unten (der verbietet
+Markdown-TODO-Listen nur für Upstreams Tracking).
 
 This file provides guidance to Claude Code when working with this repository.
 
