@@ -15,6 +15,8 @@
 #include <dzfacegroup.h>
 #include <dzface.h>
 #include <dzintproperty.h>
+#include <dzfloatproperty.h>
+#include <dzmorph.h>
 #include <dzvec3.h>
 
 #include <QtCore/qvariant.h>
@@ -43,6 +45,106 @@ DzSkeleton* findFigure(const QString& nameOrLabel)
 	}
 	return nullptr;
 }
+
+// Channel spec → float property: {"bone": b, "property": p}, {"node": n,
+// "property": p}, {"morph": m} or {"property": p} on the figure itself.
+// Properties match by name first, then by label.
+DzFloatProperty* findChannel(DzSkeleton* fig, const QVariantMap& spec, QString& err)
+{
+	const QString morph = spec.value("morph").toString();
+	if (!morph.isEmpty()) {
+		DzObject* obj = fig->getObject();
+		if (obj) {
+			if (DzMorph* m = qobject_cast<DzMorph*>(obj->findModifier(morph)))
+				return m->getValueControl();
+			for (int i = 0; i < obj->getNumModifiers(); ++i) {
+				DzMorph* m = qobject_cast<DzMorph*>(obj->getModifier(i));
+				if (m && m->getValueControl() && m->getValueControl()->getLabel() == morph)
+					return m->getValueControl();
+			}
+		}
+		err = "morph not found: " + morph;
+		return nullptr;
+	}
+	DzElement* owner = fig;
+	if (spec.contains("bone")) {
+		owner = fig->findBone(spec.value("bone").toString());
+		if (!owner) { err = "bone not found: " + spec.value("bone").toString(); return nullptr; }
+	} else if (spec.contains("node")) {
+		const QString name = spec.value("node").toString();
+		DzNode* node = dzScene->findNode(name);
+		if (!node) node = dzScene->findNodeByLabel(name);
+		if (!node) { err = "node not found: " + name; return nullptr; }
+		owner = node;
+	}
+	const QString name = spec.value("property").toString();
+	if (name.isEmpty()) { err = "channel needs \"morph\" or \"property\""; return nullptr; }
+	DzProperty* prop = owner->findProperty(name);
+	if (!prop) prop = owner->findPropertyByLabel(name);
+	DzFloatProperty* fp = qobject_cast<DzFloatProperty*>(prop);
+	if (!fp) err = QString("float property not found: %1 on %2").arg(name, owner->getLabel());
+	return fp;
+}
+
+// Sets channel values at one scene time without leaving a trace: an existing
+// key at that time gets its value back, a key the override created is deleted,
+// an unanimated channel gets its static value back. Restores on destruction.
+class ChannelOverrides {
+public:
+	// mismatches counts channels whose restore could not be verified (key count
+	// or value differ) — reported in the v2 header so a client notices.
+	ChannelOverrides(const std::vector<DzFloatProperty*>& props, DzTime tm, quint32& mismatches)
+		: m_tm(tm), m_mismatches(mismatches)
+	{
+		m_state.reserve(props.size());
+		for (DzFloatProperty* p : props) {
+			State s;
+			s.prop     = p;
+			s.numKeys  = p->getNumKeys();
+			int idx    = -1;
+			s.keyAtTm  = s.numKeys > 0 && p->isKey(tm, idx);
+			s.oldValue = s.keyAtTm ? p->getKeyValue(idx) : p->getLocalValue(tm);
+			m_state.push_back(s);
+		}
+	}
+	~ChannelOverrides()
+	{
+		for (const State& s : m_state) {
+			int idx = -1;
+			if (s.numKeys == 0) {
+				// Without keys a channel sits at its default and any setValue()
+				// adds a key (Studio 6), so dropping the keys is the restore.
+				s.prop->deleteAllKeys();
+			} else if (s.keyAtTm) {
+				if (s.prop->isKey(m_tm, idx)) s.prop->setKeyValue(idx, (float)s.oldValue);
+			} else if (s.prop->isKey(m_tm, idx)) {
+				s.prop->deleteKeys(idx, idx);
+			}
+			if (s.prop->getNumKeys() != s.numKeys || s.prop->getLocalValue(m_tm) != s.oldValue)
+				++m_mismatches;
+		}
+	}
+	void apply(const std::vector<float>& values)
+	{
+		for (size_t i = 0; i < m_state.size(); ++i) {
+			DzFloatProperty* p = m_state[i].prop;
+			int idx = -1;
+			if (m_state[i].numKeys == 0)  p->setValue(values[i]);
+			else if (p->isKey(m_tm, idx)) p->setKeyValue(idx, values[i]);
+			else                          p->setValue(m_tm, values[i]);
+		}
+	}
+private:
+	struct State {
+		DzFloatProperty* prop;
+		int              numKeys;
+		bool             keyAtTm;
+		double           oldValue;
+	};
+	DzTime             m_tm;
+	quint32&           m_mismatches;
+	std::vector<State> m_state;
+};
 
 // Restores frame and resolution level however exportFrames() leaves.
 struct SceneStateGuard {
@@ -100,6 +202,35 @@ HttpResult GeometryExporter::exportFrames(const QByteArray& jsonBody)
 		if (!bone) return jsonError(ErrorCode::INVALID_FIELD, "bone not found: " + b.toString());
 		bones.push_back(bone);
 	}
+
+	// Override sets: one row of values per set, one value per channel.
+	std::vector<DzFloatProperty*> channels;
+	for (const QVariant& c : body.value("channels").toList()) {
+		QString err;
+		DzFloatProperty* p = findChannel(fig, c.toMap(), err);
+		if (!p) return jsonError(ErrorCode::INVALID_FIELD, err);
+		channels.push_back(p);
+	}
+	const QVariantList valueRows = body.value("values").toList();
+	if (channels.empty() != valueRows.isEmpty())
+		return jsonError(ErrorCode::INVALID_FIELD, "\"channels\" and \"values\" must be given together");
+	std::vector<std::vector<float>> sets;
+	for (const QVariant& r : valueRows) {
+		const QVariantList row = r.toList();
+		if (row.size() != (int)channels.size())
+			return jsonError(ErrorCode::INVALID_FIELD,
+				QString("values row %1 has %2 entries, expected %3").arg(sets.size()).arg(row.size()).arg(channels.size()));
+		std::vector<float> vals;
+		vals.reserve(row.size());
+		for (const QVariant& v : row) {
+			bool ok = false;
+			vals.push_back((float)v.toDouble(&ok));
+			if (!ok) return jsonError(ErrorCode::INVALID_FIELD, QString("values row %1: not a number").arg(sets.size()));
+		}
+		sets.push_back(vals);
+	}
+	const bool hasSets = !sets.empty();
+	const size_t evalsPerFrame = hasSets ? sets.size() : 1;
 
 	// Vertex subset: explicit indices first, then the surfaces' facet vertices,
 	// each vertex once, in first-seen order.
@@ -159,50 +290,61 @@ HttpResult GeometryExporter::exportFrames(const QByteArray& jsonBody)
 
 	quint32 numVerts = 0;
 	int     frameVerts = 0;
+	quint32 restoreMismatches = 0;
 	QByteArray vertData, boneData;
 	for (size_t k = 0; k < frames.size(); ++k) {
 		dzScene->setFrame(frames[k]);
+		// Restores this frame's channels before the next setFrame (or on error).
+		ChannelOverrides overrides(channels, dzScene->getTime(), restoreMismatches);
+		for (size_t s = 0; s < evalsPerFrame; ++s) {
+			if (hasSets) overrides.apply(sets[s]);
+			obj->forceCacheUpdate(fig);
+			DzVertexMesh* mesh = obj->getCachedGeom();
+			if (!mesh)
+				return jsonError(ErrorCode::INTERNAL_ERROR, "no cached geometry");
+			const int     n   = mesh->getNumVertices();
+			const DzPnt3* pts = mesh->getVerticesPtr();
+			if (k == 0 && s == 0) {
+				if (resolutionMode == "base" && baseMesh && n != baseVerts)
+					return jsonError(ErrorCode::INTERNAL_ERROR,
+						QString("cached mesh has %1 vertices, base mesh %2").arg(n).arg(baseVerts));
+				if (hasSubset && n < baseVerts)
+					return jsonError(ErrorCode::INTERNAL_ERROR, "cached mesh smaller than base mesh");
+				frameVerts = n;
+				numVerts   = hasSubset ? (quint32)subset.size() : (quint32)n;
+				vertData.reserve((int)(frames.size() * evalsPerFrame * numVerts * sizeof(DzPnt3)));
+			} else if (n != frameVerts) {
+				return jsonError(ErrorCode::INTERNAL_ERROR, "vertex count changed between evaluations");
+			}
+			if (hasSubset) {
+				for (quint32 idx : subset)
+					vertData.append(reinterpret_cast<const char*>(pts[idx]), (int)sizeof(DzPnt3));
+			} else {
+				vertData.append(reinterpret_cast<const char*>(pts), n * (int)sizeof(DzPnt3));
+			}
+			for (DzBone* bone : bones) {
+				const DzVec3 p = bone->getWSPos();
+				append(boneData, p.m_x); append(boneData, p.m_y); append(boneData, p.m_z);
+			}
+		}
+	}
+	if (hasSets) {
+		// The cache still holds the last override set; re-evaluate the restored
+		// state so later readers (and sceneUpdate=false callers) see the scene as it was.
 		obj->forceCacheUpdate(fig);
-		DzVertexMesh* mesh = obj->getCachedGeom();
-		if (!mesh)
-			return jsonError(ErrorCode::INTERNAL_ERROR, "no cached geometry");
-		const int     n   = mesh->getNumVertices();
-		const DzPnt3* pts = mesh->getVerticesPtr();
-		if (k == 0) {
-			if (resolutionMode == "base" && baseMesh && n != baseVerts)
-				return jsonError(ErrorCode::INTERNAL_ERROR,
-					QString("cached mesh has %1 vertices, base mesh %2").arg(n).arg(baseVerts));
-			if (hasSubset && n < baseVerts)
-				return jsonError(ErrorCode::INTERNAL_ERROR, "cached mesh smaller than base mesh");
-			frameVerts = n;
-			numVerts   = hasSubset ? (quint32)subset.size() : (quint32)n;
-			vertData.reserve((int)(frames.size() * numVerts * sizeof(DzPnt3)));
-		} else if (n != frameVerts) {
-			return jsonError(ErrorCode::INTERNAL_ERROR, "vertex count changed between frames");
-		}
-		if (hasSubset) {
-			for (quint32 idx : subset)
-				vertData.append(reinterpret_cast<const char*>(pts[idx]), (int)sizeof(DzPnt3));
-		} else {
-			vertData.append(reinterpret_cast<const char*>(pts), n * (int)sizeof(DzPnt3));
-		}
-		for (DzBone* bone : bones) {
-			const DzVec3 p = bone->getWSPos();
-			append(boneData, p.m_x); append(boneData, p.m_y); append(boneData, p.m_z);
-		}
 	}
 
 	// ── Assemble payload ─────────────────────────────────────────────────────
 	QByteArray out;
 	out.reserve(32 + (int)frames.size() * 4 + (int)subset.size() * 4 + vertData.size() + boneData.size());
 	out.append("DZGF", 4);
-	append(out, (quint32)1);
+	append(out, (quint32)(hasSets ? 2 : 1));
 	append(out, (quint32)frames.size());
 	append(out, numVerts);
 	append(out, (quint32)bones.size());
-	append(out, (quint32)(hasSubset ? 1 : 0));
-	append(out, (quint32)0);
-	append(out, (quint32)0);
+	append(out, (quint32)((hasSubset ? 1 : 0) | (hasSets ? 2 : 0)));
+	append(out, (quint32)(hasSets ? sets.size() : 0));
+	append(out, restoreMismatches);
 	out.append(reinterpret_cast<const char*>(frames.data()), (int)(frames.size() * sizeof(qint32)));
 	if (hasSubset)
 		out.append(reinterpret_cast<const char*>(subset.data()), (int)(subset.size() * sizeof(quint32)));
