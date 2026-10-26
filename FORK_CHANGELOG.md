@@ -7,7 +7,7 @@ This fork's version scheme is `<upstream-version>+bb.<n>` — see
 are tracked in [CHANGELOG.md](CHANGELOG.md) (mirrored from upstream, not
 duplicated here) — only fork-specific fixes are listed below.
 
-## Unreleased
+## 2.9.2+bb.3 — 2026-10-27
 
 ### Added
 
