@@ -5,7 +5,7 @@
 #define DZSRV_MAJOR   2
 #define DZSRV_MINOR   9
 #define DZSRV_REV     2
-#define DZSRV_BUILD   3
+#define DZSRV_BUILD   4
 
 #define DZSRV_VERSION     DZ_MAKE_VERSION( DZSRV_MAJOR, DZSRV_MINOR, DZSRV_REV, DZSRV_BUILD )
-#define DZSRV_VERSION_STR "2.9.2+bb.3"
+#define DZSRV_VERSION_STR "2.9.2+bb.4"

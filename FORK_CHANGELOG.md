@@ -7,6 +7,24 @@ This fork's version scheme is `<upstream-version>+bb.<n>` — see
 are tracked in [CHANGELOG.md](CHANGELOG.md) (mirrored from upstream, not
 duplicated here) — only fork-specific fixes are listed below.
 
+## 2.9.2+bb.4 — 2026-10-27
+
+### Added
+
+`POST /geometry/frames` takes `"vertices": false`: per frame and override set
+only the requested bone origins are returned (`numVerts = 0`, DZGF layout
+unchanged), skipping `forceCacheUpdate` and the mesh read. Needs `"bones"`;
+`indices`/`surfaces` are rejected. Measured on a dressed G8F: bone origins
+bit-identical to the mesh path, ~6 ms less per evaluation — worth it for
+calls with many override sets. Requested by pinkcharakter (bug 48).
+
+Not a fix for per-call latency: after any call that changes the frame or a
+channel (also a plain DazScript `setFrame` there and back), DAZ Studio spends
+~0.8 s on the main thread re-evaluating the scene (+~0.15 s with a Filament
+viewport), and the next request queues behind it. The call itself takes
+~15–35 ms. Iterative clients that issue one call per step pay this per step;
+it does not occur with ≥1 s between calls or when nothing changed.
+
 ## 2.9.2+bb.3 — 2026-10-27
 
 ### Added
