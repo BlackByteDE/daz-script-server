@@ -35,6 +35,7 @@ CLAUDE.md. Das Python-Gegenstück liegt in
 
 | Was | Quelle | Seit | Details |
 |---|---|---|---|
+| `POST /geometry/frames` ohne Netz: Schalter (z. B. `"vertices": false`), der je Override-Satz nur die Bone-Ursprünge liefert und `forceCacheUpdate`/Netz-Lesen überspringt (Format DZGF unverändert, `numVerts = 0`) — für reine Bone-IKs; danach `daz_hand_follow` neu messen | pinkcharakter | 2026-10-27 | Bug 48, [../pinkcharakter/docs/bugs/tooling-tests.md](../pinkcharakter/docs/bugs/tooling-tests.md) |
 
 ## Später / optional
 
