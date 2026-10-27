@@ -28,6 +28,10 @@
 //                                        properties match name, then label
 //     "values":     [[float, ...], ...]  required with channels: one override
 //                                        set per row, one value per channel
+//     "vertices":   true                 optional; false returns bone origins
+//                                        only (numVerts = 0, needs "bones",
+//                                        no indices/surfaces) and skips the
+//                                        mesh deformation — for pure bone IKs
 //   }
 //   Without indices/surfaces all vertices are returned.
 //

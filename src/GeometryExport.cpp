@@ -232,6 +232,12 @@ HttpResult GeometryExporter::exportFrames(const QByteArray& jsonBody)
 	const bool hasSets = !sets.empty();
 	const size_t evalsPerFrame = hasSets ? sets.size() : 1;
 
+	// Bones only: skips the mesh deformation — getWSPos() evaluates the joint
+	// chain on its own, so pure bone IKs avoid ~0.2 s of forceCacheUpdate per set.
+	const bool withVerts = body.value("vertices", true).toBool();
+	if (!withVerts && bones.empty())
+		return jsonError(ErrorCode::INVALID_FIELD, "\"vertices\": false needs \"bones\"");
+
 	// Vertex subset: explicit indices first, then the surfaces' facet vertices,
 	// each vertex once, in first-seen order.
 	DzFacetMesh* baseMesh = qobject_cast<DzFacetMesh*>(shape->getGeometry());
@@ -240,6 +246,8 @@ HttpResult GeometryExporter::exportFrames(const QByteArray& jsonBody)
 	const QVariantList indexList   = body.value("indices").toList();
 	const QStringList  surfaceList = body.value("surfaces").toStringList();
 	const bool hasSubset = !indexList.isEmpty() || !surfaceList.isEmpty();
+	if (hasSubset && !withVerts)
+		return jsonError(ErrorCode::INVALID_FIELD, "\"indices\"/\"surfaces\" need vertices");
 	if (hasSubset) {
 		if (!baseMesh)
 			return jsonError(ErrorCode::INTERNAL_ERROR, "figure geometry is not a facet mesh");
@@ -271,7 +279,7 @@ HttpResult GeometryExporter::exportFrames(const QByteArray& jsonBody)
 	guard.resolution      = nullptr;
 	guard.resolutionValue = 0;
 	guard.sceneUpdate     = body.value("sceneUpdate", true).toBool();
-	if (resolutionMode == "base" && baseMesh) {
+	if (withVerts && resolutionMode == "base" && baseMesh) {
 		// The cached geometry is usually the base cage even at "High Resolution"
 		// (SubD is applied later), and toggling the level costs ~1 s of
 		// re-evaluation — so only switch when the vertex count says we must.
@@ -298,29 +306,31 @@ HttpResult GeometryExporter::exportFrames(const QByteArray& jsonBody)
 		ChannelOverrides overrides(channels, dzScene->getTime(), restoreMismatches);
 		for (size_t s = 0; s < evalsPerFrame; ++s) {
 			if (hasSets) overrides.apply(sets[s]);
-			obj->forceCacheUpdate(fig);
-			DzVertexMesh* mesh = obj->getCachedGeom();
-			if (!mesh)
-				return jsonError(ErrorCode::INTERNAL_ERROR, "no cached geometry");
-			const int     n   = mesh->getNumVertices();
-			const DzPnt3* pts = mesh->getVerticesPtr();
-			if (k == 0 && s == 0) {
-				if (resolutionMode == "base" && baseMesh && n != baseVerts)
-					return jsonError(ErrorCode::INTERNAL_ERROR,
-						QString("cached mesh has %1 vertices, base mesh %2").arg(n).arg(baseVerts));
-				if (hasSubset && n < baseVerts)
-					return jsonError(ErrorCode::INTERNAL_ERROR, "cached mesh smaller than base mesh");
-				frameVerts = n;
-				numVerts   = hasSubset ? (quint32)subset.size() : (quint32)n;
-				vertData.reserve((int)(frames.size() * evalsPerFrame * numVerts * sizeof(DzPnt3)));
-			} else if (n != frameVerts) {
-				return jsonError(ErrorCode::INTERNAL_ERROR, "vertex count changed between evaluations");
-			}
-			if (hasSubset) {
-				for (quint32 idx : subset)
-					vertData.append(reinterpret_cast<const char*>(pts[idx]), (int)sizeof(DzPnt3));
-			} else {
-				vertData.append(reinterpret_cast<const char*>(pts), n * (int)sizeof(DzPnt3));
+			if (withVerts) {
+				obj->forceCacheUpdate(fig);
+				DzVertexMesh* mesh = obj->getCachedGeom();
+				if (!mesh)
+					return jsonError(ErrorCode::INTERNAL_ERROR, "no cached geometry");
+				const int     n   = mesh->getNumVertices();
+				const DzPnt3* pts = mesh->getVerticesPtr();
+				if (k == 0 && s == 0) {
+					if (resolutionMode == "base" && baseMesh && n != baseVerts)
+						return jsonError(ErrorCode::INTERNAL_ERROR,
+							QString("cached mesh has %1 vertices, base mesh %2").arg(n).arg(baseVerts));
+					if (hasSubset && n < baseVerts)
+						return jsonError(ErrorCode::INTERNAL_ERROR, "cached mesh smaller than base mesh");
+					frameVerts = n;
+					numVerts   = hasSubset ? (quint32)subset.size() : (quint32)n;
+					vertData.reserve((int)(frames.size() * evalsPerFrame * numVerts * sizeof(DzPnt3)));
+				} else if (n != frameVerts) {
+					return jsonError(ErrorCode::INTERNAL_ERROR, "vertex count changed between evaluations");
+				}
+				if (hasSubset) {
+					for (quint32 idx : subset)
+						vertData.append(reinterpret_cast<const char*>(pts[idx]), (int)sizeof(DzPnt3));
+				} else {
+					vertData.append(reinterpret_cast<const char*>(pts), n * (int)sizeof(DzPnt3));
+				}
 			}
 			for (DzBone* bone : bones) {
 				const DzVec3 p = bone->getWSPos();
@@ -328,7 +338,7 @@ HttpResult GeometryExporter::exportFrames(const QByteArray& jsonBody)
 			}
 		}
 	}
-	if (hasSets) {
+	if (hasSets && withVerts) {
 		// The cache still holds the last override set; re-evaluate the restored
 		// state so later readers (and sceneUpdate=false callers) see the scene as it was.
 		obj->forceCacheUpdate(fig);
